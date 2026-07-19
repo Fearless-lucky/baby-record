@@ -15,6 +15,7 @@ class AppState extends ChangeNotifier {
   static const _keySaveSpace = 'importSaveSpace';
   static const _keyPinHash = 'appLockPinHash';
   static const _keyLastBackup = 'lastBackupAt';
+  static const _keyAuthor = 'authorName';
 
   final BabyRepository _babies = BabyRepository();
 
@@ -24,6 +25,9 @@ class AppState extends ChangeNotifier {
   int accentIndex = 0;
   bool importSaveSpace = false;
   DateTime? lastBackupAt;
+
+  /// 记录者名字（如"妈妈"），用于新记录的作者标记与同步身份。
+  String authorName = '';
 
   String? _pinHash;
 
@@ -56,6 +60,7 @@ class AppState extends ChangeNotifier {
     importSaveSpace = prefs.getBool(_keySaveSpace) ?? false;
     _pinHash = prefs.getString(_keyPinHash);
     locked = hasAppLock;
+    authorName = prefs.getString(_keyAuthor) ?? '';
     final backupMs = prefs.getInt(_keyLastBackup);
     if (backupMs != null) {
       lastBackupAt = DateTime.fromMillisecondsSinceEpoch(backupMs);
@@ -105,6 +110,13 @@ class AppState extends ChangeNotifier {
     importSaveSpace = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keySaveSpace, value);
+    notifyListeners();
+  }
+
+  Future<void> setAuthorName(String name) async {
+    authorName = name.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyAuthor, authorName);
     notifyListeners();
   }
 

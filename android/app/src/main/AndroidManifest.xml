@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅用于同一 WiFi 下的局域网同步，不访问任何互联网服务 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="宝宝成长记录"
         android:name="${applicationName}"

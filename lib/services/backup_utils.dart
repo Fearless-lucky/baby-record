@@ -26,6 +26,44 @@ String? validateBackupManifest(Map<String, dynamic> manifest) {
   return null;
 }
 
+/// 各表当前版本的全部列名：恢复/合并时按此过滤，
+/// 保证旧备份（缺列）与新备份（多列）都能安全写入当前数据库。
+const kTableColumns = <String, List<String>>{
+  'babies': [
+    'id', 'name', 'nickname', 'birthDate', 'avatarFile', 'headerFile',
+    'createdAt',
+  ],
+  'moments': [
+    'id', 'babyId', 'date', 'content', 'isFavorite', 'milestoneId',
+    'createdAt', 'updatedAt', 'author',
+  ],
+  'media': [
+    'id', 'recordId', 'type', 'file', 'thumbFile', 'width', 'height',
+    'sortOrder',
+  ],
+  'tags': ['id', 'babyId', 'name'],
+  'moment_tags': ['momentId', 'tagId'],
+  'growth': [
+    'id', 'babyId', 'date', 'heightCm', 'weightKg', 'headCm', 'note',
+    'author',
+  ],
+  'milestones': [
+    'id', 'babyId', 'title', 'iconKey', 'date', 'note', 'createdAt',
+    'author',
+  ],
+};
+
+/// 只保留当前版本已知的列；未知列丢弃，缺失列由数据库默认值补齐。
+Map<String, Object?> filterRowForTable(String table, Map row) {
+  final columns = kTableColumns[table];
+  if (columns == null) return {};
+  final result = <String, Object?>{};
+  for (final c in columns) {
+    if (row.containsKey(c)) result[c] = row[c];
+  }
+  return result;
+}
+
 /// 计算备份/数据库中被引用的媒体与头像文件名集合。
 Set<String> referencedFiles(Map<String, dynamic> tables) {
   final files = <String>{};

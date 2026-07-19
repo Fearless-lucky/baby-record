@@ -210,9 +210,17 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                     ),
                   ],
                   const SizedBox(height: 28),
-                  Text(
-                    '记录于 ${AppDateUtils.full(m.createdAt)}',
-                    style: t.labelSmall,
+                  Row(
+                    children: [
+                      Text(
+                        '记录于 ${AppDateUtils.full(m.createdAt)}',
+                        style: t.labelSmall,
+                      ),
+                      if (m.author.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        AuthorChip(m.author),
+                      ],
+                    ],
                   ),
                 ],
               ),

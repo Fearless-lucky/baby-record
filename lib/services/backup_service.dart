@@ -59,8 +59,9 @@ Future<void> _decryptFile(Map<String, String> args) async {
       sha256.convert(utf8.encode(args['password']!)).bytes));
   final iv = enc.IV(Uint8List.fromList(bytes.sublist(0, 16)));
   final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
-  final decrypted =
-      encrypter.decryptBytes(enc.Encrypted(Uint8List.fromList(bytes.sublist(16))), iv: iv);
+  final decrypted = encrypter.decryptBytes(
+      enc.Encrypted(Uint8List.fromList(bytes.sublist(16))),
+      iv: iv);
   await File(args['dest']!).writeAsBytes(decrypted, flush: true);
 }
 
@@ -87,15 +88,68 @@ class BackupService {
 
   static const encryptedExt = '.babybak';
 
-  /// 创建备份，返回文件路径。[password] 非空时生成加密备份。
-  Future<String> createBackup(
-      {String? password, void Function(String step)? onProgress}) async {
-    onProgress?.call('正在收集数据…');
+  /// 导出当前数据库全部表（同步与备份共用）。
+  Future<Map<String, List<Map<String, Object?>>>> dumpTables() async {
     final db = await DatabaseHelper.instance.db;
     final tables = <String, List<Map<String, Object?>>>{};
     for (final t in kBackupTables) {
       tables[t] = await db.query(t);
     }
+    return tables;
+  }
+
+  /// 合并一组表到当前数据库（INSERT OR IGNORE，重复自动跳过）。
+  /// 返回 (新增宝宝数, 新增记录数)。
+  Future<(int, int)> mergeTables(Map<String, dynamic> tables) async {
+    final db = await DatabaseHelper.instance.db;
+    var newBabies = 0;
+    var newMoments = 0;
+    await db.transaction((txn) async {
+      for (final t in kBackupTables) {
+        final rows = tables[t];
+        if (rows is! List) continue;
+        for (final row in rows) {
+          if (row is! Map) continue;
+          final result = await txn.insert(t, filterRowForTable(t, row),
+              conflictAlgorithm: ConflictAlgorithm.ignore);
+          if (result != 0) {
+            if (t == 'babies') newBabies++;
+            if (t == 'moments') newMoments++;
+          }
+        }
+      }
+    });
+    return (newBabies, newMoments);
+  }
+
+  /// 把解压目录中的 media/avatars 文件移入正式目录，返回移动数量。
+  Future<int> moveMediaIn(Directory tempDir, String sub) async {
+    final srcDir = Directory(p.join(tempDir.path, sub));
+    if (!srcDir.existsSync()) return 0;
+    final target = sub == 'media'
+        ? await MediaService.instance.mediaDir()
+        : await MediaService.instance.avatarDir();
+    var count = 0;
+    await for (final e in srcDir.list()) {
+      if (e is File) {
+        final dest = p.join(target.path, p.basename(e.path));
+        try {
+          await e.rename(dest);
+        } catch (_) {
+          await e.copy(dest);
+          await e.delete();
+        }
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// 创建备份，返回文件路径。[password] 非空时生成加密备份。
+  Future<String> createBackup(
+      {String? password, void Function(String step)? onProgress}) async {
+    onProgress?.call('正在收集数据…');
+    final tables = await dumpTables();
     final manifest = {
       'app': 'baby_record',
       'formatVersion': 2,
@@ -206,28 +260,6 @@ class BackupService {
     return manifest;
   }
 
-  Future<int> _moveMediaIn(Directory tempDir, String sub) async {
-    final srcDir = Directory(p.join(tempDir.path, sub));
-    if (!srcDir.existsSync()) return 0;
-    final target = sub == 'media'
-        ? await MediaService.instance.mediaDir()
-        : await MediaService.instance.avatarDir();
-    var count = 0;
-    await for (final e in srcDir.list()) {
-      if (e is File) {
-        final dest = p.join(target.path, p.basename(e.path));
-        try {
-          await e.rename(dest);
-        } catch (_) {
-          await e.copy(dest);
-          await e.delete();
-        }
-        count++;
-      }
-    }
-    return count;
-  }
-
   /// 删除目标目录中未被引用的文件，返回释放的字节数。
   Future<int> _deleteUnreferenced(
       Directory dir, Set<String> referenced, String prefix) async {
@@ -267,8 +299,8 @@ class BackupService {
       final tables = manifest['tables'] as Map<String, dynamic>;
 
       onProgress?.call('正在恢复照片与视频…');
-      final mediaCount = await _moveMediaIn(tempDir, 'media');
-      await _moveMediaIn(tempDir, 'avatars');
+      final mediaCount = await moveMediaIn(tempDir, 'media');
+      await moveMediaIn(tempDir, 'avatars');
 
       onProgress?.call('正在写入数据…');
       final db = await DatabaseHelper.instance.db;
@@ -279,7 +311,7 @@ class BackupService {
         for (final t in kBackupTables) {
           for (final row in (tables[t] as List)) {
             if (row is Map) {
-              await txn.insert(t, row.map((k, v) => MapEntry(k.toString(), v)));
+              await txn.insert(t, filterRowForTable(t, row));
             }
           }
         }
@@ -322,27 +354,11 @@ class BackupService {
       final tables = manifest['tables'] as Map<String, dynamic>;
 
       onProgress?.call('正在合并媒体文件…');
-      final newMedia = await _moveMediaIn(tempDir, 'media');
-      await _moveMediaIn(tempDir, 'avatars');
+      final newMedia = await moveMediaIn(tempDir, 'media');
+      await moveMediaIn(tempDir, 'avatars');
 
       onProgress?.call('正在合并数据…');
-      final db = await DatabaseHelper.instance.db;
-      var newBabies = 0;
-      var newMoments = 0;
-      await db.transaction((txn) async {
-        for (final t in kBackupTables) {
-          for (final row in (tables[t] as List)) {
-            if (row is! Map) continue;
-            final map = row.map((k, v) => MapEntry(k.toString(), v));
-            final result = await txn.insert(t, map,
-                conflictAlgorithm: ConflictAlgorithm.ignore);
-            if (result != 0) {
-              if (t == 'babies') newBabies++;
-              if (t == 'moments') newMoments++;
-            }
-          }
-        }
-      });
+      final (newBabies, newMoments) = await mergeTables(tables);
 
       return MergeSummary(newBabies, newMoments, newMedia);
     } finally {

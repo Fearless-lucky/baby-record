@@ -194,24 +194,28 @@ class _TimelinePageState extends State<TimelinePage> {
           ? const Color(0xFFB9CBA8)
           : const Color(0xFF4E5C46);
 
+  /// 藤蔓条目：Stack + Positioned.fill 让茎随条目实际高度延伸，
+  /// 避免 IntrinsicHeight 与 LayoutBuilder 冲突造成的高度错误。
   Widget _vineItem({required bool isMonthNode, required Widget child}) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 34,
-            child: CustomPaint(
-              painter: VinePainter(
-                isMonthNode: isMonthNode,
-                stemColor: _stemColor(context),
-                leafColor: _leafColor(context),
-              ),
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: CustomPaint(
+            painter: VinePainter(
+              isMonthNode: isMonthNode,
+              stemColor: _stemColor(context),
+              leafColor: _leafColor(context),
             ),
           ),
-          Expanded(child: child),
-        ],
-      ),
+        ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(width: 34),
+            Expanded(child: child),
+          ],
+        ),
+      ],
     );
   }
 

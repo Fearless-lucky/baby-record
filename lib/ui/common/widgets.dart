@@ -289,6 +289,44 @@ Future<T?> runWithProgress<T>(
   return result;
 }
 
+/// 作者小徽章：显示这条记录是谁上传的。
+class AuthorChip extends StatelessWidget {
+  final String author;
+  final bool light;
+
+  const AuthorChip(this.author, {super.key, this.light = false});
+
+  @override
+  Widget build(BuildContext context) {
+    if (author.isEmpty) return const SizedBox.shrink();
+    final p = context.palette;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: light
+            ? Colors.white.withValues(alpha: 0.22)
+            : p.accentSoft.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.person_outline_rounded,
+              size: 10, color: light ? Colors.white : p.accent),
+          const SizedBox(width: 3),
+          Text(
+            author,
+            style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: light ? Colors.white : p.accent),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 收藏心形按钮（带轻量弹性动画）。
 class FavoriteButton extends StatelessWidget {
   final bool active;

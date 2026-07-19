@@ -53,6 +53,33 @@ void main() {
     });
   });
 
+  group('filterRowForTable', () {
+    test('未知列被丢弃，已知列保留', () {
+      final row = filterRowForTable('moments', {
+        'id': 'm1',
+        'babyId': 'b1',
+        'content': 'hi',
+        'author': '妈妈',
+        'futureColumn': '应被丢弃',
+      });
+      expect(row['id'], 'm1');
+      expect(row['author'], '妈妈');
+      expect(row.containsKey('futureColumn'), isFalse);
+    });
+
+    test('缺失列不出现（由数据库默认值补齐）', () {
+      final row = filterRowForTable('moments', {'id': 'm1'});
+      expect(row.containsKey('author'), isFalse);
+      expect(row.containsKey('content'), isFalse);
+    });
+
+    test('备份涉及的全部表都有列定义', () {
+      for (final t in kBackupTables) {
+        expect(kTableColumns.containsKey(t), isTrue, reason: t);
+      }
+    });
+  });
+
   group('referencedFiles', () {
     test('收集媒体与头像引用', () {
       final files = referencedFiles(

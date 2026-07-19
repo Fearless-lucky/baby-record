@@ -271,6 +271,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
           milestoneId: _milestoneId,
           createdAt: e?.createdAt ?? now,
           updatedAt: now,
+          author: e?.author ?? appState.authorName,
         );
         final allMedia = [
           for (var i = 0; i < kept.length; i++)

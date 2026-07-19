@@ -11,7 +11,8 @@ class DatabaseHelper {
   /// 数据库版本。
   /// v1: 初始版本。
   /// v2: babies 增加 headerFile 列（首页自定义头图）。
-  static const _version = 2;
+  /// v3: moments / milestones / growth 增加 author 列（WiFi 同步的作者标记）。
+  static const _version = 3;
 
   Database? _db;
 
@@ -29,6 +30,14 @@ class DatabaseHelper {
         // 逐版本迁移；新增变更时在下方追加分支并将 _version 加一。
         if (oldVersion < 2) {
           await db.execute('ALTER TABLE babies ADD COLUMN headerFile TEXT');
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+              "ALTER TABLE moments ADD COLUMN author TEXT NOT NULL DEFAULT ''");
+          await db.execute(
+              "ALTER TABLE milestones ADD COLUMN author TEXT NOT NULL DEFAULT ''");
+          await db.execute(
+              "ALTER TABLE growth ADD COLUMN author TEXT NOT NULL DEFAULT ''");
         }
       },
       onCreate: (db, version) async {
@@ -51,7 +60,8 @@ CREATE TABLE moments(
   isFavorite INTEGER NOT NULL DEFAULT 0,
   milestoneId TEXT,
   createdAt INTEGER NOT NULL,
-  updatedAt INTEGER NOT NULL
+  updatedAt INTEGER NOT NULL,
+  author TEXT NOT NULL DEFAULT ''
 )''');
         await db.execute(
             'CREATE INDEX idx_moments_baby_date ON moments(babyId, date DESC)');
@@ -91,7 +101,8 @@ CREATE TABLE growth(
   heightCm REAL,
   weightKg REAL,
   headCm REAL,
-  note TEXT NOT NULL DEFAULT ''
+  note TEXT NOT NULL DEFAULT '',
+  author TEXT NOT NULL DEFAULT ''
 )''');
         await db.execute(
             'CREATE INDEX idx_growth_baby_date ON growth(babyId, date)');
@@ -103,7 +114,8 @@ CREATE TABLE milestones(
   iconKey TEXT NOT NULL DEFAULT 'custom',
   date INTEGER NOT NULL,
   note TEXT NOT NULL DEFAULT '',
-  createdAt INTEGER NOT NULL
+  createdAt INTEGER NOT NULL,
+  author TEXT NOT NULL DEFAULT ''
 )''');
         await db.execute(
             'CREATE INDEX idx_milestones_baby ON milestones(babyId, date DESC)');

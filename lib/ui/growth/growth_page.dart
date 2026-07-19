@@ -82,6 +82,7 @@ class _GrowthEntrySheetState extends State<_GrowthEntrySheet> {
         weightKg: w,
         headCm: hc,
         note: _note.text.trim(),
+        author: context.read<AppState>().authorName,
       ));
     } else {
       await repo.update(GrowthEntry(
@@ -92,6 +93,7 @@ class _GrowthEntrySheetState extends State<_GrowthEntrySheet> {
         weightKg: w,
         headCm: hc,
         note: _note.text.trim(),
+        author: widget.existing!.author,
       ));
     }
     if (!mounted) return;

@@ -76,6 +76,10 @@ class RecordCard extends StatelessWidget {
                               style: t.headlineMedium?.copyWith(fontSize: 19),
                             ),
                           ),
+                          if (moment.author.isNotEmpty) ...[
+                            AuthorChip(moment.author),
+                            const SizedBox(width: 6),
+                          ],
                           if (moment.isFavorite)
                             Icon(Icons.favorite_rounded,
                                 size: 16, color: p.favorite),

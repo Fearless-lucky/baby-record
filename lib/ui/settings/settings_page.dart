@@ -11,6 +11,7 @@ import '../../theme/app_theme.dart';
 import '../common/widgets.dart';
 import 'baby_edit_page.dart';
 import 'lock_page.dart';
+import 'wifi_sync_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -407,10 +408,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 _cardTitle(t, '家庭共享'),
                 const SizedBox(height: 4),
                 Text(
-                  '没有服务器，也不会上传任何数据。把"共享包"通过微信发给家人，对方导入后两边数据合并；定期互发即可保持一致。适合爸爸、妈妈、爷爷、奶奶各自记录后汇总。',
+                  '没有服务器，也不会上传任何数据。同一 WiFi 下可直接互相同步（并集）；不在同一网络时，用共享包互传。记录会标记是谁上传的。',
                   style: t.bodySmall,
                 ),
                 const SizedBox(height: 8),
+                _actionTile(p, t,
+                    icon: Icons.wifi_rounded,
+                    title: '同一 WiFi 同步',
+                    subtitle: state.authorName.isEmpty
+                        ? '先设置"我的名字"，再与家人同步'
+                        : '以「${state.authorName}」身份同步 · 自动合并并集',
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const WifiSyncPage()))),
                 _actionTile(p, t,
                     icon: Icons.ios_share_rounded,
                     title: '导出共享包',
@@ -594,7 +605,7 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 _cardTitle(t, '关于'),
                 const SizedBox(height: 6),
-                Text('宝宝成长记录 1.1.0', style: t.bodyMedium),
+                Text('宝宝成长记录 1.2.0', style: t.bodyMedium),
                 const SizedBox(height: 4),
                 Text(
                   '一本只属于家人的数字成长纪念册。\n无账号 · 无广告 · 无云端，数据完全属于你自己。',

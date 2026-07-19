@@ -71,6 +71,7 @@ class _MilestoneSheetState extends State<_MilestoneSheet> {
             date: _date,
             note: _note.text.trim(),
             createdAt: DateTime.now(),
+            author: context.read<AppState>().authorName,
           )
         : Milestone(
             id: widget.existing!.id,
@@ -80,6 +81,7 @@ class _MilestoneSheetState extends State<_MilestoneSheet> {
             date: _date,
             note: _note.text.trim(),
             createdAt: widget.existing!.createdAt,
+            author: widget.existing!.author,
           );
     if (widget.existing == null) {
       await repo.insert(milestone);

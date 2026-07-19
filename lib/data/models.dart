@@ -164,6 +164,9 @@ class Moment {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// 记录者名字（家庭内显示，如"妈妈"）；同步时随数据携带。
+  final String author;
+
   /// 查询时填充，不入库。
   final List<MediaItem> media;
   final List<Tag> tags;
@@ -177,6 +180,7 @@ class Moment {
     this.milestoneId,
     required this.createdAt,
     required this.updatedAt,
+    this.author = '',
     this.media = const [],
     this.tags = const [],
   });
@@ -194,6 +198,7 @@ class Moment {
         'milestoneId': milestoneId,
         'createdAt': createdAt.millisecondsSinceEpoch,
         'updatedAt': updatedAt.millisecondsSinceEpoch,
+        'author': author,
       };
 
   factory Moment.fromMap(
@@ -212,6 +217,7 @@ class Moment {
             DateTime.fromMillisecondsSinceEpoch((m['createdAt'] as int?) ?? 0),
         updatedAt:
             DateTime.fromMillisecondsSinceEpoch((m['updatedAt'] as int?) ?? 0),
+        author: (m['author'] as String?) ?? '',
         media: media,
         tags: tags,
       );
@@ -222,6 +228,7 @@ class Moment {
     bool? isFavorite,
     String? Function()? milestoneId,
     DateTime? updatedAt,
+    String? author,
     List<MediaItem>? media,
     List<Tag>? tags,
   }) =>
@@ -234,6 +241,7 @@ class Moment {
         milestoneId: milestoneId != null ? milestoneId() : this.milestoneId,
         createdAt: createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
+        author: author ?? this.author,
         media: media ?? this.media,
         tags: tags ?? this.tags,
       );
@@ -248,6 +256,7 @@ class GrowthEntry {
   final double? weightKg;
   final double? headCm;
   final String note;
+  final String author;
 
   const GrowthEntry({
     required this.id,
@@ -257,6 +266,7 @@ class GrowthEntry {
     this.weightKg,
     this.headCm,
     this.note = '',
+    this.author = '',
   });
 
   bool get isEmpty => heightCm == null && weightKg == null && headCm == null;
@@ -275,6 +285,7 @@ class GrowthEntry {
         'weightKg': weightKg,
         'headCm': headCm,
         'note': note,
+        'author': author,
       };
 
   factory GrowthEntry.fromMap(Map<String, Object?> m) => GrowthEntry(
@@ -285,6 +296,7 @@ class GrowthEntry {
         weightKg: (m['weightKg'] as num?)?.toDouble(),
         headCm: (m['headCm'] as num?)?.toDouble(),
         note: (m['note'] as String?) ?? '',
+        author: (m['author'] as String?) ?? '',
       );
 }
 
@@ -329,6 +341,7 @@ class Milestone {
   final DateTime date;
   final String note;
   final DateTime createdAt;
+  final String author;
 
   const Milestone({
     required this.id,
@@ -338,6 +351,7 @@ class Milestone {
     required this.date,
     this.note = '',
     required this.createdAt,
+    this.author = '',
   });
 
   IconData get icon => kMilestoneIcons[iconKey] ?? Icons.star_rounded;
@@ -350,6 +364,7 @@ class Milestone {
         'date': date.millisecondsSinceEpoch,
         'note': note,
         'createdAt': createdAt.millisecondsSinceEpoch,
+        'author': author,
       };
 
   factory Milestone.fromMap(Map<String, Object?> m) => Milestone(
@@ -361,6 +376,7 @@ class Milestone {
         note: (m['note'] as String?) ?? '',
         createdAt:
             DateTime.fromMillisecondsSinceEpoch((m['createdAt'] as int?) ?? 0),
+        author: (m['author'] as String?) ?? '',
       );
 }
 
