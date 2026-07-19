@@ -605,7 +605,7 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 _cardTitle(t, '关于'),
                 const SizedBox(height: 6),
-                Text('宝宝成长记录 1.2.0', style: t.bodyMedium),
+                Text('瑜见时光 1.2.1', style: t.bodyMedium),
                 const SizedBox(height: 4),
                 Text(
                   '一本只属于家人的数字成长纪念册。\n无账号 · 无广告 · 无云端，数据完全属于你自己。',
