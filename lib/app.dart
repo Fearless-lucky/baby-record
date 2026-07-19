@@ -6,6 +6,7 @@ import 'state/app_state.dart';
 import 'theme/app_theme.dart';
 import 'ui/growth/growth_page.dart';
 import 'ui/home/home_page.dart';
+import 'ui/onboarding/onboarding_page.dart';
 import 'ui/settings/baby_edit_page.dart';
 import 'ui/settings/lock_page.dart';
 import 'ui/settings/settings_page.dart';
@@ -43,7 +44,7 @@ class _BabyAppState extends State<BabyApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     return MaterialApp(
-      title: '宝宝成长记录',
+      title: '瑜见时光',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(state.accentIndex),
       darkTheme: AppTheme.dark(state.accentIndex),
@@ -57,9 +58,11 @@ class _BabyAppState extends State<BabyApp> with WidgetsBindingObserver {
       locale: const Locale('zh'),
       home: state.hasAppLock && state.locked
           ? const LockPage()
-          : state.needsOnboarding
-              ? const BabyEditPage(isOnboarding: true)
-              : const AppShell(),
+          : state.needsTutorial
+              ? const OnboardingPage()
+              : state.needsOnboarding
+                  ? const BabyEditPage(isOnboarding: true)
+                  : const AppShell(),
     );
   }
 }

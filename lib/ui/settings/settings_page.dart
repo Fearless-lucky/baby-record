@@ -9,6 +9,7 @@ import '../../services/media_service.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_theme.dart';
 import '../common/widgets.dart';
+import '../onboarding/onboarding_page.dart';
 import 'baby_edit_page.dart';
 import 'lock_page.dart';
 import 'wifi_sync_page.dart';
@@ -610,6 +611,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text(
                   '一本只属于家人的数字成长纪念册。\n无账号 · 无广告 · 无云端，数据完全属于你自己。',
                   style: t.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                _actionTile(
+                  p,
+                  t,
+                  icon: Icons.menu_book_outlined,
+                  title: '使用教程',
+                  subtitle: '重新查看记录、成长、同步与备份说明',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const OnboardingPage(replay: true),
+                    ),
+                  ),
                 ),
               ],
             ),

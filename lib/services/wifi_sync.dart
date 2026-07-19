@@ -150,6 +150,11 @@ class SyncHostSession {
         await _replyJson(req, {'error': '同步码错误'}, status: 403);
         return;
       }
+      if (unionReady && (path == '/manifest' || path == '/media')) {
+        await _replyJson(req, {'error': '主机已完成合并，请重新发起一轮同步'},
+            status: 409);
+        return;
+      }
       switch ((req.method, path)) {
         case ('POST', '/manifest'):
           await _onManifest(req);
@@ -297,16 +302,16 @@ class SyncClient {
       {Duration timeout = const Duration(seconds: 5)}) async {
     final found = <String, SyncHostInfo>{};
     RawDatagramSocket? socket;
+    StreamSubscription<RawSocketEvent>? subscription;
     try {
       socket = await RawDatagramSocket.bind(
           InternetAddress.anyIPv4, kBeaconPort,
           reuseAddress: true);
-      final completer = Completer<void>();
-      final timer = Timer(timeout, completer.complete);
-      await for (final event in socket) {
+      final activeSocket = socket;
+      subscription = activeSocket.listen((event) {
         if (event == RawSocketEvent.read) {
-          final dg = socket.receive();
-          if (dg == null) continue;
+          final dg = activeSocket.receive();
+          if (dg == null) return;
           final msg = utf8.decode(dg.data, allowMalformed: true);
           final parts = msg.split('|');
           if (parts.length == 3 && parts[0] == kBeaconMagic) {
@@ -315,11 +320,11 @@ class SyncClient {
                 parts[1]);
           }
         }
-        if (completer.isCompleted) break;
-      }
-      timer.cancel();
+      });
+      await Future<void>.delayed(timeout);
     } catch (_) {} finally {
       try {
+        await subscription?.cancel();
         socket?.close();
       } catch (_) {}
     }

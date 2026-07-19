@@ -16,6 +16,7 @@ class AppState extends ChangeNotifier {
   static const _keyPinHash = 'appLockPinHash';
   static const _keyLastBackup = 'lastBackupAt';
   static const _keyAuthor = 'authorName';
+  static const _keyTutorialSeen = 'tutorialSeen';
 
   final BabyRepository _babies = BabyRepository();
 
@@ -28,6 +29,9 @@ class AppState extends ChangeNotifier {
 
   /// 记录者名字（如"妈妈"），用于新记录的作者标记与同步身份。
   String authorName = '';
+
+  /// 首次启动教程是否已经完成。已有数据的老用户默认视为已完成。
+  bool tutorialSeen = false;
 
   String? _pinHash;
 
@@ -50,6 +54,8 @@ class AppState extends ChangeNotifier {
 
   bool get needsOnboarding => babies.isEmpty;
 
+  bool get needsTutorial => !tutorialSeen;
+
   bool get hasAppLock => _pinHash != null;
 
   Future<void> init() async {
@@ -66,6 +72,11 @@ class AppState extends ChangeNotifier {
       lastBackupAt = DateTime.fromMillisecondsSinceEpoch(backupMs);
     }
     await refreshBabies();
+    final savedTutorialState = prefs.getBool(_keyTutorialSeen);
+    tutorialSeen = savedTutorialState ?? babies.isNotEmpty;
+    if (savedTutorialState == null && tutorialSeen) {
+      await prefs.setBool(_keyTutorialSeen, true);
+    }
     _initialized = true;
     notifyListeners();
   }
@@ -117,6 +128,13 @@ class AppState extends ChangeNotifier {
     authorName = name.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyAuthor, authorName);
+    notifyListeners();
+  }
+
+  Future<void> completeTutorial() async {
+    tutorialSeen = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyTutorialSeen, true);
     notifyListeners();
   }
 
