@@ -2,14 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
+import 'services/reminder_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
 import 'ui/growth/growth_page.dart';
 import 'ui/home/home_page.dart';
+import 'ui/onboarding/onboarding_page.dart';
+import 'ui/record/edit_record_page.dart';
 import 'ui/settings/baby_edit_page.dart';
 import 'ui/settings/lock_page.dart';
 import 'ui/settings/settings_page.dart';
 import 'ui/timeline/timeline_page.dart';
+
+/// 供本地通知点击后跳转使用的全局导航键。
+final appNavigatorKey = GlobalKey<NavigatorState>();
 
 class BabyApp extends StatefulWidget {
   const BabyApp({super.key});
@@ -23,6 +29,18 @@ class _BabyAppState extends State<BabyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 点击"每日回顾提醒"通知 → 直接打开记录页。
+    ReminderService.onOpenRecordToday = () {
+      final ctx = appNavigatorKey.currentContext;
+      if (ctx == null) return;
+      final state = ctx.read<AppState>();
+      if (state.locked || state.needsOnboarding || state.needsTutorial) {
+        return;
+      }
+      appNavigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => const EditRecordPage()),
+      );
+    };
   }
 
   @override
@@ -44,6 +62,7 @@ class _BabyAppState extends State<BabyApp> with WidgetsBindingObserver {
     final state = context.watch<AppState>();
     return MaterialApp(
       title: '宝宝成长记录',
+      navigatorKey: appNavigatorKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(state.accentIndex),
       darkTheme: AppTheme.dark(state.accentIndex),
@@ -57,9 +76,11 @@ class _BabyAppState extends State<BabyApp> with WidgetsBindingObserver {
       locale: const Locale('zh'),
       home: state.hasAppLock && state.locked
           ? const LockPage()
-          : state.needsOnboarding
-              ? const BabyEditPage(isOnboarding: true)
-              : const AppShell(),
+          : state.needsTutorial
+              ? const OnboardingPage()
+              : state.needsOnboarding
+                  ? const BabyEditPage(isOnboarding: true)
+                  : const AppShell(),
     );
   }
 }

@@ -240,7 +240,9 @@ class _HostViewState extends State<_HostView> {
           if (mounted) setState(() => _logs.add(line));
         },
         onChanged: () {
-          if (mounted) setState(() {});
+          if (!mounted) return;
+          setState(() {});
+          _refreshAppData();
         },
       );
       await session.start();
@@ -252,6 +254,12 @@ class _HostViewState extends State<_HostView> {
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
+  }
+
+  Future<void> _refreshAppData() async {
+    final state = context.read<AppState>();
+    await state.refreshBabies();
+    state.bumpData();
   }
 
   @override
@@ -410,6 +418,8 @@ class _JoinViewState extends State<_JoinView> {
   bool _discovering = true;
   SyncHostInfo? _selected;
   final _ipController = TextEditingController();
+  final _portController =
+      TextEditingController(text: kSyncBasePort.toString());
   final _codeController = TextEditingController();
   final List<String> _logs = [];
   bool _syncing = false;
@@ -425,6 +435,7 @@ class _JoinViewState extends State<_JoinView> {
   @override
   void dispose() {
     _ipController.dispose();
+    _portController.dispose();
     _codeController.dispose();
     super.dispose();
   }
@@ -442,7 +453,9 @@ class _JoinViewState extends State<_JoinView> {
 
   Future<void> _sync() async {
     final ip = _selected?.ip ?? _ipController.text.trim();
-    final port = _selected?.port ?? kSyncBasePort;
+    final port = _selected?.port ??
+        int.tryParse(_portController.text.trim()) ??
+        kSyncBasePort;
     final code = _codeController.text.trim();
     if (ip.isEmpty) {
       setState(() => _error = '请选择或输入主机 IP');
@@ -450,6 +463,10 @@ class _JoinViewState extends State<_JoinView> {
     }
     if (code.length != 4) {
       setState(() => _error = '请输入主机上的 4 位同步码');
+      return;
+    }
+    if (port < 1 || port > 65535) {
+      setState(() => _error = '请输入有效的主机端口');
       return;
     }
     setState(() {
@@ -468,7 +485,10 @@ class _JoinViewState extends State<_JoinView> {
         },
       );
       if (!mounted) return;
-      context.read<AppState>().bumpData();
+      final state = context.read<AppState>();
+      await state.refreshBabies();
+      state.bumpData();
+      if (!mounted) return;
       setState(() => _result = result);
     } catch (e) {
       if (mounted) {
@@ -556,12 +576,29 @@ class _JoinViewState extends State<_JoinView> {
                 ),
               if (_selected == null) ...[
                 const SizedBox(height: 8),
-                TextField(
-                  controller: _ipController,
-                  enabled: !_syncing,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: '主机 IP', hintText: '如 192.168.1.5'),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _ipController,
+                        enabled: !_syncing,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: '主机 IP', hintText: '如 192.168.1.5'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _portController,
+                        enabled: !_syncing,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: '端口'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
               const SizedBox(height: 10),

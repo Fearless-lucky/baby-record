@@ -18,10 +18,12 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.babyrecord.baby_record"
-    compileSdk = 35
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
+        // flutter_local_notifications 需要 desugaring
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -39,6 +41,10 @@ android {
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // 真机只需 ARM；x86/x86_64 仅模拟器用，去掉可显著减小 APK（MLKit 原生库很大）
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -61,6 +67,10 @@ android {
             }
         }
     }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 flutter {

@@ -6,9 +6,11 @@ import '../../data/models.dart';
 import '../../data/repositories.dart';
 import '../../services/backup_service.dart';
 import '../../services/media_service.dart';
+import '../../services/reminder_service.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_theme.dart';
 import '../common/widgets.dart';
+import '../onboarding/onboarding_page.dart';
 import 'baby_edit_page.dart';
 import 'lock_page.dart';
 import 'wifi_sync_page.dart';
@@ -42,6 +44,75 @@ class _SettingsPageState extends State<SettingsPage> {
     if (baby == null) return;
     final stats = await MediaService.instance.stats(baby.id);
     if (mounted) setState(() => _stats = stats);
+  }
+
+  Future<void> _pickReminderMode(AppState state) async {
+    final p = context.palette;
+    final mode = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (value, title, sub) in const [
+              (0, '从不', '关闭每日回顾提醒'),
+              (1, '每天', '晚上 8 点提醒为今天留一条记录'),
+              (2, '仅周末', '只在周六、周日晚上 8 点提醒'),
+            ])
+              ListTile(
+                title: Text(title),
+                subtitle: Text(sub),
+                trailing: state.reminderMode == value
+                    ? Icon(Icons.check_rounded, color: p.accent)
+                    : null,
+                onTap: () => Navigator.pop(ctx, value),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (mode == null || !mounted) return;
+    if (mode != 0) {
+      // 用户主动开启时才申请通知权限。
+      final granted = await ReminderService.instance.ensurePermission();
+      if (!granted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('系统未允许通知，请在系统设置中开启后再试')),
+        );
+        return;
+      }
+    }
+    await state.setReminderMode(mode);
+  }
+
+  Future<void> _pickDailyPhotoLimit(AppState state) async {
+    final p = context.palette;
+    final limit = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (value, title) in const [
+              (20, '20 张'),
+              (60, '60 张'),
+              (0, '全部'),
+            ])
+              ListTile(
+                title: Text(title),
+                trailing: state.dailyPhotoLimit == value
+                    ? Icon(Icons.check_rounded, color: p.accent)
+                    : null,
+                onTap: () => Navigator.pop(ctx, value),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (limit == null || !mounted) return;
+    await state.setDailyPhotoLimit(limit);
   }
 
   /// 备份前询问是否加密；返回 (确认, 密码)。
@@ -399,6 +470,42 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 16),
           ],
 
+          // 记录与提醒
+          _card(
+            p,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _cardTitle(t, '记录与提醒'),
+                const SizedBox(height: 4),
+                Text(
+                  '提醒与照片识别都只在这台手机上进行，不会上传任何内容。',
+                  style: t.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                _actionTile(p, t,
+                    icon: Icons.notifications_outlined,
+                    title: '每日回顾提醒',
+                    subtitle: switch (state.reminderMode) {
+                      1 => '每天 20:00 提醒，当天已记录则跳过',
+                      2 => '仅周末 20:00 提醒，当天已记录则跳过',
+                      _ => '从不提醒',
+                    },
+                    onTap: () => _pickReminderMode(state)),
+                _actionTile(p, t,
+                    icon: Icons.auto_awesome_rounded,
+                    title: '当天照片推荐数量',
+                    subtitle: switch (state.dailyPhotoLimit) {
+                      20 => '每次最多展示 20 张',
+                      60 => '每次最多展示 60 张',
+                      _ => '展示当天全部照片',
+                    },
+                    onTap: () => _pickDailyPhotoLimit(state)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
           // 家庭共享
           _card(
             p,
@@ -605,11 +712,25 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 _cardTitle(t, '关于'),
                 const SizedBox(height: 6),
-                Text('瑜见时光 1.2.1', style: t.bodyMedium),
+                Text('瑜见时光 1.3.0', style: t.bodyMedium),
                 const SizedBox(height: 4),
                 Text(
                   '一本只属于家人的数字成长纪念册。\n无账号 · 无广告 · 无云端，数据完全属于你自己。',
                   style: t.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                _actionTile(
+                  p,
+                  t,
+                  icon: Icons.menu_book_outlined,
+                  title: '使用教程',
+                  subtitle: '重新查看记录、成长、同步与备份说明',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const OnboardingPage(replay: true),
+                    ),
+                  ),
                 ),
               ],
             ),

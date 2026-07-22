@@ -22,8 +22,12 @@ class _CalendarPageState extends State<CalendarPage> {
   late DateTime _month;
   late DateTime _selected;
   Set<int> _daysWithRecords = {};
+  Map<int, String> _covers = {};
+  Set<int> _milestoneDays = {};
+  Set<int> _memoryDays = {};
   List<Moment> _dayMoments = [];
   List<Moment> _memories = [];
+  int _filter = 0; // 0 全部 / 1 照片 / 2 文字 / 3 里程碑
   int _loadedVersion = -1;
   String? _loadedBabyId;
 
@@ -49,10 +53,20 @@ class _CalendarPageState extends State<CalendarPage> {
   Future<void> _loadMonth() async {
     final baby = context.read<AppState>().currentBaby;
     if (baby == null) return;
-    final days = await MomentRepository()
-        .daysWithMoments(baby.id, _month.year, _month.month);
+    final repo = MomentRepository();
+    final (days, covers, milestoneDays, memoryDays) = await (
+      repo.daysWithMoments(baby.id, _month.year, _month.month),
+      repo.monthCovers(baby.id, _month.year, _month.month),
+      MilestoneRepository().daysInMonth(baby.id, _month.year, _month.month),
+      repo.monthMemoryDays(baby.id, _month.year, _month.month),
+    ).wait;
     if (!mounted) return;
-    setState(() => _daysWithRecords = days);
+    setState(() {
+      _daysWithRecords = days;
+      _covers = covers;
+      _milestoneDays = milestoneDays;
+      _memoryDays = memoryDays;
+    });
     _loadDay();
   }
 
@@ -98,10 +112,40 @@ class _CalendarPageState extends State<CalendarPage> {
                   onPressed: () => _changeMonth(-1),
                 ),
                 Expanded(
-                  child: Text(
-                    AppDateUtils.yearMonth(_month),
-                    style: t.headlineMedium,
-                    textAlign: TextAlign.center,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        AppDateUtils.yearMonth(_month),
+                        style: t.headlineMedium,
+                      ),
+                      if (baby != null &&
+                          baby.birthDate.month == _month.month) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7BE4B)
+                                .withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.cake_rounded,
+                                  size: 13, color: Color(0xFFE0A428)),
+                              SizedBox(width: 3),
+                              Text('生日月',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFFE0A428),
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 IconButton(
@@ -127,8 +171,22 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
           const SizedBox(height: 6),
           _buildGrid(p, t),
+          const SizedBox(height: 6),
+          // 图例
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              children: [
+                _legend(p.accent, '记录'),
+                const SizedBox(width: 14),
+                _legend(const Color(0xFFF7BE4B), '里程碑'),
+                const SizedBox(width: 14),
+                _legend(const Color(0xFF7C6AE6), '往年今日'),
+              ],
+            ),
+          ),
           const Divider(height: 28),
-          // 选中日期
+          // 选中日期 + 内容筛选
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(
@@ -136,14 +194,36 @@ class _CalendarPageState extends State<CalendarPage> {
               style: t.titleLarge,
             ),
           ),
-          if (_dayMoments.isEmpty)
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                for (final (i, label) in const [
+                  (0, '全部'),
+                  (1, '照片'),
+                  (2, '文字'),
+                  (3, '里程碑'),
+                ])
+                  ChoiceChip(
+                    label: Text(label),
+                    selected: _filter == i,
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (_) => setState(() => _filter = i),
+                  ),
+              ],
+            ),
+          ),
+          if (_filteredDayMoments.isEmpty)
             Padding(
               padding: const EdgeInsets.all(28),
-              child: Text('这一天还没有记录',
+              child: Text(
+                  _dayMoments.isEmpty ? '这一天还没有记录' : '没有符合筛选的内容',
                   style: t.bodySmall, textAlign: TextAlign.center),
             )
           else
-            for (final m in _dayMoments)
+            for (final m in _filteredDayMoments)
               RecordCard(
                 moment: m,
                 baby: baby,
@@ -169,6 +249,36 @@ class _CalendarPageState extends State<CalendarPage> {
         ],
       ),
     );
+  }
+
+  Widget _legend(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
+      ],
+    );
+  }
+
+  List<Moment> get _filteredDayMoments {
+    switch (_filter) {
+      case 1:
+        return _dayMoments.where((m) => m.media.isNotEmpty).toList();
+      case 2:
+        return _dayMoments
+            .where((m) => m.content.trim().isNotEmpty)
+            .toList();
+      case 3:
+        return _dayMoments.where((m) => m.milestoneId != null).toList();
+      default:
+        return _dayMoments;
+    }
   }
 
   Widget _buildGrid(AppPalette p, TextTheme t) {
@@ -199,12 +309,22 @@ class _CalendarPageState extends State<CalendarPage> {
   Widget _dayCell(int index, int leading, int daysInMonth, DateTime today,
       AppPalette p, TextTheme t) {
     final day = index - leading + 1;
-    if (day < 1 || day > daysInMonth) return const SizedBox(height: 52);
+    if (day < 1 || day > daysInMonth) return const SizedBox(height: 56);
     final date = DateTime(_month.year, _month.month, day, 12);
     final isSelected = date == _selected;
     final isToday = date == today;
     final hasRecord = _daysWithRecords.contains(day);
+    final hasMilestone = _milestoneDays.contains(day);
+    final hasMemory = _memoryDays.contains(day);
+    final cover = _covers[day];
     final isFuture = date.isAfter(today);
+
+    Widget dot(Color color) => Container(
+          width: 4,
+          height: 4,
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+        );
 
     return GestureDetector(
       onTap: () {
@@ -212,50 +332,81 @@ class _CalendarPageState extends State<CalendarPage> {
         _loadDay();
       },
       child: SizedBox(
-        height: 52,
+        height: 56,
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
-                width: 34,
-                height: 34,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isSelected
-                      ? p.accent
+                  border: isSelected
+                      ? Border.all(color: p.accent, width: 2)
                       : isToday
+                          ? Border.all(color: p.accent, width: 1.2)
+                          : null,
+                  color: cover == null && isSelected
+                      ? p.accent
+                      : cover == null && isToday
                           ? p.accentSoft
                           : Colors.transparent,
                 ),
-                child: Center(
-                  child: Text(
-                    '$day',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: isSelected || isToday
-                          ? FontWeight.w700
-                          : FontWeight.w400,
-                      color: isSelected
-                          ? Colors.white
-                          : isFuture
-                              ? p.subInk.withValues(alpha: 0.4)
-                              : p.ink,
-                    ),
-                  ),
+                child: ClipOval(
+                  child: cover != null
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ThumbImage(cover, cacheWidth: 120),
+                            Container(
+                              color: Colors.black.withValues(
+                                  alpha: isSelected ? 0.15 : 0.3),
+                            ),
+                            Center(
+                              child: Text(
+                                '$day',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                        color: Colors.black54,
+                                        blurRadius: 4),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : Center(
+                          child: Text(
+                            '$day',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isSelected || isToday
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                              color: isSelected
+                                  ? Colors.white
+                                  : isFuture
+                                      ? p.subInk.withValues(alpha: 0.4)
+                                      : p.ink,
+                            ),
+                          ),
+                        ),
                 ),
               ),
-              const SizedBox(height: 2),
-              Container(
-                width: 5,
-                height: 5,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: hasRecord
-                      ? (isSelected ? Colors.white : p.accent)
-                      : Colors.transparent,
-                ),
+              const SizedBox(height: 3),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (hasRecord) dot(isSelected ? p.accent : p.accent),
+                  if (hasMilestone) dot(const Color(0xFFF7BE4B)),
+                  if (hasMemory) dot(const Color(0xFF7C6AE6)),
+                ],
               ),
             ],
           ),
