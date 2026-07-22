@@ -1,8 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/utils/date_utils.dart';
 import '../../data/models.dart';
@@ -30,7 +33,23 @@ class EditRecordPage extends StatefulWidget {
   final Moment? existing;
   final String? presetMilestoneId;
 
-  const EditRecordPage({super.key, this.existing, this.presetMilestoneId});
+  /// 新建时的默认日期（如"补记昨天"）。
+  final DateTime? presetDate;
+
+  /// 新建时直接带入的媒体（如快捷拍照/选照片）。
+  final List<XFile>? initialMedia;
+
+  /// 打开后键盘直接聚焦正文（"写一句话"/拍完照引导）。
+  final bool autofocusContent;
+
+  const EditRecordPage({
+    super.key,
+    this.existing,
+    this.presetMilestoneId,
+    this.presetDate,
+    this.initialMedia,
+    this.autofocusContent = false,
+  });
 
   @override
   State<EditRecordPage> createState() => _EditRecordPageState();
@@ -58,20 +77,36 @@ class _EditRecordPageState extends State<EditRecordPage> {
   int _dailyPhotoTotal = 0;
   int _analyzedPhotoCount = 0;
   int _dailyPhotoRequest = 0;
+  bool _faceOnly = false;
+  Timer? _draftTimer;
 
   bool get _isEdit => widget.existing != null;
+
+  /// 只有不带任何预设打开"记录今天"时才恢复草稿。
+  bool get _useDraft =>
+      widget.existing == null &&
+      widget.presetDate == null &&
+      (widget.initialMedia?.isEmpty ?? true);
 
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
-    _date = AppDateUtils.day(e?.date ?? DateTime.now());
+    _date = AppDateUtils.day(e?.date ?? widget.presetDate ?? DateTime.now());
     _content = TextEditingController(text: e?.content ?? '');
     _favorite = e?.isFavorite ?? false;
     _milestoneId = widget.presetMilestoneId ?? e?.milestoneId;
     if (e != null) {
       _media.addAll(e.media.map(_MediaDraft.existing));
       _selectedTags.addAll(e.tags.map((t) => t.name));
+    }
+    final initial = widget.initialMedia;
+    if (initial != null && initial.isNotEmpty) {
+      _media.addAll(initial.map(_MediaDraft.picked));
+    }
+    _content.addListener(_scheduleDraftSave);
+    if (_useDraft) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _restoreDraft());
     }
     _loadMeta();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadDailyPhotos());
@@ -92,9 +127,111 @@ class _EditRecordPageState extends State<EditRecordPage> {
   @override
   void dispose() {
     _dailyPhotoRequest++;
+    _draftTimer?.cancel();
     _dailyAlbumService.dispose();
     _content.dispose();
     super.dispose();
+  }
+
+  // ---------------- 自动草稿 ----------------
+
+  String? _draftKey() {
+    final baby = context.read<AppState>().currentBaby;
+    return baby == null ? null : 'recordDraft_${baby.id}';
+  }
+
+  void _scheduleDraftSave() {
+    if (!_useDraft) return;
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 600), _saveDraft);
+  }
+
+  Future<void> _saveDraft() async {
+    if (!mounted || !_useDraft) return;
+    final key = _draftKey();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final mediaPaths = [
+      for (final d in _media)
+        if (d.picked != null) d.picked!.path,
+    ];
+    final empty = _content.text.trim().isEmpty &&
+        mediaPaths.isEmpty &&
+        _selectedTags.isEmpty &&
+        _milestoneId == null;
+    if (empty) {
+      await prefs.remove(key);
+      return;
+    }
+    await prefs.setString(
+      key,
+      jsonEncode({
+        'date': _date.millisecondsSinceEpoch,
+        'content': _content.text,
+        'tags': _selectedTags.toList(),
+        'favorite': _favorite,
+        'milestoneId': _milestoneId,
+        'media': mediaPaths,
+      }),
+    );
+  }
+
+  Future<void> _clearDraft() async {
+    final key = _draftKey();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(key);
+  }
+
+  Future<void> _restoreDraft() async {
+    final key = _draftKey();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(key);
+    if (raw == null || !mounted) return;
+    try {
+      final m = jsonDecode(raw) as Map<String, Object?>;
+      final paths = (m['media'] as List?)?.whereType<String>() ?? const [];
+      final restoredMedia = [
+        for (final p in paths)
+          if (File(p).existsSync()) _MediaDraft.picked(XFile(p)),
+      ];
+      setState(() {
+        final dateMs = m['date'] as int?;
+        if (dateMs != null) {
+          _date = AppDateUtils.day(
+              DateTime.fromMillisecondsSinceEpoch(dateMs));
+        }
+        _content.text = (m['content'] as String?) ?? '';
+        _selectedTags
+          ..clear()
+          ..addAll((m['tags'] as List?)?.whereType<String>() ?? const []);
+        _favorite = (m['favorite'] as bool?) ?? false;
+        _milestoneId = m['milestoneId'] as String?;
+        _media.addAll(restoredMedia);
+      });
+      _loadDailyPhotos();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('已恢复上次未保存的草稿'),
+          action: SnackBarAction(
+            label: '丢弃',
+            onPressed: () {
+              setState(() {
+                _content.clear();
+                _selectedTags.clear();
+                _favorite = false;
+                _milestoneId = null;
+                _media.clear();
+              });
+              _clearDraft();
+            },
+          ),
+        ),
+      );
+    } catch (_) {
+      await prefs.remove(key);
+    }
   }
 
   Future<void> _pickDate() async {
@@ -118,6 +255,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
       final day = AppDateUtils.day(picked);
       if (day == _date) return;
       setState(() => _date = day);
+      _scheduleDraftSave();
       await _loadDailyPhotos();
     }
   }
@@ -135,7 +273,8 @@ class _EditRecordPageState extends State<EditRecordPage> {
     });
 
     try {
-      final batch = await _dailyAlbumService.loadForDay(_date);
+      final limit = context.read<AppState>().dailyPhotoLimit;
+      final batch = await _dailyAlbumService.loadForDay(_date, limit: limit);
       if (!mounted || request != _dailyPhotoRequest) return;
       setState(() {
         _dailyPhotos = batch.candidates;
@@ -210,6 +349,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
         if (!_allTagNames.contains(scene)) _allTagNames.add(scene);
       }
     });
+    _scheduleDraftSave();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(added == 0 ? '没有可添加的照片' : '已添加 $added 张当天照片')),
     );
@@ -222,6 +362,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
       setState(() {
         _media.addAll(files.map(_MediaDraft.picked));
       });
+      _scheduleDraftSave();
       // 大视频提醒：备份与分享会明显变慢。
       for (final x in files) {
         if (MediaService.isVideoName(x.name)) {
@@ -250,6 +391,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
     final d = _media[index];
     if (d.existing != null) _removedMediaIds.add(d.existing!.id);
     setState(() => _media.removeAt(index));
+    _scheduleDraftSave();
   }
 
   Future<void> _addTag() async {
@@ -282,6 +424,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
         _selectedTags.add(name);
         if (!_allTagNames.contains(name)) _allTagNames.add(name);
       });
+      _scheduleDraftSave();
     }
   }
 
@@ -338,11 +481,13 @@ class _EditRecordPageState extends State<EditRecordPage> {
           _milestones = await MilestoneRepository().list(baby.id);
         }
         setState(() => _milestoneId = created.id);
+        _scheduleDraftSave();
       }
       return;
     }
     if (result != null && mounted) {
       setState(() => _milestoneId = result.isEmpty ? null : result);
+      _scheduleDraftSave();
     }
   }
 
@@ -459,7 +604,10 @@ class _EditRecordPageState extends State<EditRecordPage> {
     if (!mounted) return;
     setState(() => _saving = false);
     if (saved != null) {
+      _clearDraft();
       appState.bumpData();
+      // 今天已有记录，跳过今晚的回顾提醒。
+      appState.refreshReminder();
       Navigator.pop(context, saved);
     }
   }
@@ -478,7 +626,10 @@ class _EditRecordPageState extends State<EditRecordPage> {
             padding: const EdgeInsets.only(right: 8),
             child: FavoriteButton(
               active: _favorite,
-              onTap: () => setState(() => _favorite = !_favorite),
+              onTap: () {
+                setState(() => _favorite = !_favorite);
+                _scheduleDraftSave();
+              },
             ),
           ),
         ],
@@ -527,6 +678,7 @@ class _EditRecordPageState extends State<EditRecordPage> {
             controller: _content,
             maxLines: null,
             minLines: 4,
+            autofocus: widget.autofocusContent,
             style: t.bodyLarge,
             decoration: const InputDecoration(
               hintText: '今天发生了什么值得记住的事？',
@@ -558,12 +710,14 @@ class _EditRecordPageState extends State<EditRecordPage> {
                 ChoiceChip(
                   label: Text(name),
                   selected: _selectedTags.contains(name),
-                  onSelected:
-                      (v) => setState(() {
-                        v
-                            ? _selectedTags.add(name)
-                            : _selectedTags.remove(name);
-                      }),
+                  onSelected: (v) {
+                    setState(() {
+                      v
+                          ? _selectedTags.add(name)
+                          : _selectedTags.remove(name);
+                    });
+                    _scheduleDraftSave();
+                  },
                 ),
               if (_allTagNames.isEmpty)
                 Text('还没有标签，点击右上角"新标签"创建', style: t.bodySmall),
@@ -676,13 +830,14 @@ class _EditRecordPageState extends State<EditRecordPage> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Text(
-                  _dailyPhotoTotal > DailyAlbumService.maxSuggestions
-                      ? '当天共 $_dailyPhotoTotal 张，先展示 ${DailyAlbumService.maxSuggestions} 张'
-                      : '当天共 $_dailyPhotoTotal 张',
-                  style: t.bodySmall,
+                Expanded(
+                  child: Text(
+                    _dailyPhotoTotal > _dailyPhotos.length
+                        ? '当天共 $_dailyPhotoTotal 张，先展示 ${_dailyPhotos.length} 张'
+                        : '当天共 $_dailyPhotoTotal 张',
+                    style: t.bodySmall,
+                  ),
                 ),
-                const Spacer(),
                 if (_analyzedPhotoCount < _dailyPhotos.length)
                   Text(
                     '识别 $_analyzedPhotoCount/${_dailyPhotos.length}',
@@ -690,115 +845,48 @@ class _EditRecordPageState extends State<EditRecordPage> {
                   ),
               ],
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 118,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _dailyPhotos.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final photo = _dailyPhotos[index];
-                  final selected = _selectedDailyPhotoIds.contains(
-                    photo.asset.id,
-                  );
-                  final added = _addedDailyPhotoIds.contains(photo.asset.id);
-                  return GestureDetector(
-                    onTap:
-                        added
-                            ? null
-                            : () => setState(() {
-                              selected
-                                  ? _selectedDailyPhotoIds.remove(
-                                    photo.asset.id,
-                                  )
-                                  : _selectedDailyPhotoIds.add(photo.asset.id);
-                            }),
-                    child: SizedBox(
-                      width: 104,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Image.memory(photo.thumbnail, fit: BoxFit.cover),
-                            Positioned(
-                              left: 5,
-                              right: 5,
-                              bottom: 5,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.58),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (photo.hasFace == true) ...[
-                                      const Icon(
-                                        Icons.face_rounded,
-                                        color: Colors.white,
-                                        size: 12,
-                                      ),
-                                      const SizedBox(width: 3),
-                                    ],
-                                    Flexible(
-                                      child: Text(
-                                        photo.scene,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            if (selected)
-                              Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: p.accent, width: 3),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                alignment: Alignment.topRight,
-                                padding: const EdgeInsets.all(5),
-                                child: CircleAvatar(
-                                  radius: 10,
-                                  backgroundColor: p.accent,
-                                  child: const Icon(
-                                    Icons.check_rounded,
-                                    size: 14,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            if (added)
-                              Container(
-                                color: Colors.black.withValues(alpha: 0.38),
-                                alignment: Alignment.center,
-                                child: const Text(
-                                  '已添加',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                FilterChip(
+                  label: const Text('只显示有人'),
+                  selected: _faceOnly,
+                  visualDensity: VisualDensity.compact,
+                  onSelected: (v) => setState(() => _faceOnly = v),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '人脸识别仅供参考，可手动挑选',
+                    style: t.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 6),
+            for (final section in _groupedDailyPhotos()) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 8),
+                child: Text(section.$1, style: t.labelLarge),
+              ),
+              SizedBox(
+                height: 118,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: section.$2.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) =>
+                      _dailyPhotoTile(section.$2[index], p),
+                ),
+              ),
+            ],
+            if (_faceOnly && _groupedDailyPhotos().isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('暂未识别到有人脸的照片', style: t.bodySmall),
+              ),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -827,6 +915,130 @@ class _EditRecordPageState extends State<EditRecordPage> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// 按上午/下午/晚上分组；组内人脸优先、其次按拍摄时间。
+  List<(String, List<DailyAlbumCandidate>)> _groupedDailyPhotos() {
+    final photos = _faceOnly
+        ? _dailyPhotos.where((x) => x.hasFace == true).toList()
+        : _dailyPhotos;
+    String sectionOf(DateTime t) {
+      if (t.hour >= 5 && t.hour < 12) return '上午';
+      if (t.hour >= 12 && t.hour < 18) return '下午';
+      return '晚上';
+    }
+
+    final groups = <String, List<DailyAlbumCandidate>>{};
+    for (final photo in photos) {
+      groups.putIfAbsent(sectionOf(photo.capturedAt), () => []).add(photo);
+    }
+    int rank(DailyAlbumCandidate c) => c.hasFace == true ? 0 : 1;
+    final result = <(String, List<DailyAlbumCandidate>)>[];
+    for (final name in const ['上午', '下午', '晚上']) {
+      final list = groups[name];
+      if (list == null || list.isEmpty) continue;
+      list.sort((a, b) {
+        final r = rank(a).compareTo(rank(b));
+        return r != 0 ? r : a.capturedAt.compareTo(b.capturedAt);
+      });
+      result.add((name, list));
+    }
+    return result;
+  }
+
+  Widget _dailyPhotoTile(DailyAlbumCandidate photo, AppPalette p) {
+    final selected = _selectedDailyPhotoIds.contains(photo.asset.id);
+    final added = _addedDailyPhotoIds.contains(photo.asset.id);
+    return GestureDetector(
+      onTap: added
+          ? null
+          : () => setState(() {
+                selected
+                    ? _selectedDailyPhotoIds.remove(photo.asset.id)
+                    : _selectedDailyPhotoIds.add(photo.asset.id);
+              }),
+      child: SizedBox(
+        width: 104,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.memory(photo.thumbnail, fit: BoxFit.cover),
+              Positioned(
+                left: 5,
+                right: 5,
+                bottom: 5,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.58),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (photo.hasFace == true) ...[
+                        const Icon(
+                          Icons.face_rounded,
+                          color: Colors.white,
+                          size: 12,
+                        ),
+                        const SizedBox(width: 3),
+                      ],
+                      Flexible(
+                        child: Text(
+                          photo.scene,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (selected)
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: p.accent, width: 3),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.topRight,
+                  padding: const EdgeInsets.all(5),
+                  child: CircleAvatar(
+                    radius: 10,
+                    backgroundColor: p.accent,
+                    child: const Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              if (added)
+                Container(
+                  color: Colors.black.withValues(alpha: 0.38),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    '已添加',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

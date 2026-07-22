@@ -272,6 +272,43 @@ class MomentRepository {
         .toSet();
   }
 
+  /// 某个月每天的封面缩略图（取当天第一张图片），用于日历相册。
+  Future<Map<int, String>> monthCovers(
+      String babyId, int year, int month) async {
+    final start = DateTime(year, month, 1, 12);
+    final end = DateTime(year, month + 1, 1, 12);
+    final rows = await (await _db).rawQuery(
+        'SELECT m.thumbFile, m.file, r.date FROM media m '
+        'JOIN moments r ON m.recordId = r.id '
+        "WHERE r.babyId = ? AND m.type = 'image' "
+        'AND r.date >= ? AND r.date < ? '
+        'ORDER BY r.date ASC, m.sortOrder ASC',
+        [babyId, start.millisecondsSinceEpoch, end.millisecondsSinceEpoch]);
+    final result = <int, String>{};
+    for (final r in rows) {
+      final day =
+          DateTime.fromMillisecondsSinceEpoch((r['date'] as int?) ?? 0).day;
+      result.putIfAbsent(
+          day, () => (r['thumbFile'] as String?) ?? (r['file'] as String));
+    }
+    return result;
+  }
+
+  /// 某个月中"往年同月"有记录的日子（其他年份），用于日历回忆标记。
+  Future<Set<int>> monthMemoryDays(
+      String babyId, int year, int month) async {
+    final mm = AppDateUtils.two(month);
+    final rows = await (await _db).rawQuery(
+        "SELECT date FROM moments WHERE babyId = ? "
+        "AND strftime('%m', date / 1000, 'unixepoch', 'localtime') = ? "
+        "AND strftime('%Y', date / 1000, 'unixepoch', 'localtime') != ?",
+        [babyId, mm, year.toString()]);
+    return rows
+        .map((r) =>
+            DateTime.fromMillisecondsSinceEpoch((r['date'] as int?) ?? 0).day)
+        .toSet();
+  }
+
   /// 当前宝宝最近一张照片（用于首页头图）。
   Future<MediaItem?> latestImage(String babyId) async {
     final rows = await (await _db).rawQuery(
@@ -394,6 +431,34 @@ class MilestoneRepository {
     final rows = await (await _db)
         .query('milestones', where: 'id = ?', whereArgs: [id]);
     return rows.isEmpty ? null : Milestone.fromMap(rows.first);
+  }
+
+  /// 最近一个里程碑（按日期）。
+  Future<Milestone?> latest(String babyId) async {
+    final rows = await (await _db).query('milestones',
+        where: 'babyId = ?',
+        whereArgs: [babyId],
+        orderBy: 'date DESC',
+        limit: 1);
+    return rows.isEmpty ? null : Milestone.fromMap(rows.first);
+  }
+
+  /// 某个月里有里程碑的日子，用于日历标记。
+  Future<Set<int>> daysInMonth(String babyId, int year, int month) async {
+    final start = DateTime(year, month, 1, 12);
+    final end = DateTime(year, month + 1, 1, 12);
+    final rows = await (await _db).query('milestones',
+        columns: ['date'],
+        where: 'babyId = ? AND date >= ? AND date < ?',
+        whereArgs: [
+          babyId,
+          start.millisecondsSinceEpoch,
+          end.millisecondsSinceEpoch
+        ]);
+    return rows
+        .map((r) =>
+            DateTime.fromMillisecondsSinceEpoch((r['date'] as int?) ?? 0).day)
+        .toSet();
   }
 
   Future<void> insert(Milestone m) async =>

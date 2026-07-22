@@ -21,7 +21,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   static const _pages = [
     _TutorialPageData(
       icon: Icons.auto_stories_rounded,
-      eyebrow: '欢迎来到瑜见时光',
+      eyebrow: '欢迎来到宝宝成长记录',
       title: '把长大，轻轻收进时光里',
       description: '一本只属于家人的数字成长纪念册。\n从第一个微笑开始，留住每一个平凡又珍贵的今天。',
       points: ['无账号，打开就能记录', '支持多个宝宝档案', '温柔的时间轴与回忆页'],
@@ -86,7 +86,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
               padding: const EdgeInsets.fromLTRB(20, 8, 12, 0),
               child: Row(
                 children: [
-                  Text('瑜见时光',
+                  Text('宝宝成长记录',
                       style: Theme.of(context).textTheme.titleLarge),
                   const Spacer(),
                   TextButton(

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/models.dart';
 import '../data/repositories.dart';
+import '../services/reminder_service.dart';
 
 /// 全局应用状态：宝宝列表、当前宝宝、主题模式、主题色、应用锁、数据版本号。
 class AppState extends ChangeNotifier {
@@ -17,6 +18,8 @@ class AppState extends ChangeNotifier {
   static const _keyLastBackup = 'lastBackupAt';
   static const _keyAuthor = 'authorName';
   static const _keyTutorialSeen = 'tutorialSeen';
+  static const _keyReminderMode = 'reminderMode';
+  static const _keyDailyPhotoLimit = 'dailyPhotoLimit';
 
   final BabyRepository _babies = BabyRepository();
 
@@ -32,6 +35,12 @@ class AppState extends ChangeNotifier {
 
   /// 首次启动教程是否已经完成。已有数据的老用户默认视为已完成。
   bool tutorialSeen = false;
+
+  /// 每日回顾提醒：0=从不，1=每天，2=仅周末。
+  int reminderMode = 0;
+
+  /// 当天照片推荐每次最多展示数量：0 表示全部。
+  int dailyPhotoLimit = 60;
 
   String? _pinHash;
 
@@ -71,6 +80,8 @@ class AppState extends ChangeNotifier {
     if (backupMs != null) {
       lastBackupAt = DateTime.fromMillisecondsSinceEpoch(backupMs);
     }
+    reminderMode = prefs.getInt(_keyReminderMode) ?? 0;
+    dailyPhotoLimit = prefs.getInt(_keyDailyPhotoLimit) ?? 60;
     await refreshBabies();
     final savedTutorialState = prefs.getBool(_keyTutorialSeen);
     tutorialSeen = savedTutorialState ?? babies.isNotEmpty;
@@ -137,6 +148,25 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_keyTutorialSeen, true);
     notifyListeners();
   }
+
+  Future<void> setReminderMode(int mode) async {
+    reminderMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyReminderMode, mode);
+    notifyListeners();
+    await ReminderService.instance.refresh(mode, currentBaby?.id);
+  }
+
+  Future<void> setDailyPhotoLimit(int limit) async {
+    dailyPhotoLimit = limit;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyDailyPhotoLimit, limit);
+    notifyListeners();
+  }
+
+  /// 当天已有记录时跳过今晚的提醒；数据变化后调用。
+  Future<void> refreshReminder() =>
+      ReminderService.instance.refresh(reminderMode, currentBaby?.id);
 
   // ---------------- 应用锁 ----------------
 

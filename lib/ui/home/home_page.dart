@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/utils/date_utils.dart';
@@ -11,6 +12,8 @@ import '../../state/app_state.dart';
 import '../../theme/app_theme.dart';
 import '../calendar/calendar_page.dart';
 import '../common/widgets.dart';
+import '../milestones/milestones_page.dart'
+    show MilestoneDetailPage;
 import '../record/edit_record_page.dart';
 import '../record/record_detail_page.dart';
 import '../search/search_page.dart';
@@ -31,8 +34,11 @@ class _HomeData {
   MediaItem? latestPhoto;
   List<Moment> recent = [];
   List<Moment> onThisDay = [];
+  List<Moment> today = [];
   GrowthEntry? latestGrowth;
+  Milestone? latestMilestone;
   int totalMoments = 0;
+  int monthRecordedDays = 0;
 }
 
 class _HomePageState extends State<HomePage> {
@@ -61,13 +67,28 @@ class _HomePageState extends State<HomePage> {
     }
     try {
       final repo = MomentRepository();
+      final now = DateTime.now();
+      final today = AppDateUtils.day(now);
       // 并行加载，减少首屏等待。
-      final (latestPhoto, recent, onThisDay, latestGrowth, total) = await (
+      final (
+        latestPhoto,
+        recent,
+        onThisDay,
+        todayMoments,
+        latestGrowth,
+        latestMilestone,
+        total,
+        monthDays,
+      ) = await (
         repo.latestImage(baby.id),
         repo.recent(baby.id, 8),
-        repo.onThisDay(baby.id, DateTime.now()),
+        repo.onThisDay(baby.id, now),
+        repo.query(baby.id,
+            filter: MomentFilter(from: today, to: today), limit: 20),
         GrowthRepository().latest(baby.id),
+        MilestoneRepository().latest(baby.id),
         repo.count(baby.id),
+        repo.daysWithMoments(baby.id, now.year, now.month),
       ).wait;
       if (!mounted) return;
       setState(() {
@@ -75,8 +96,11 @@ class _HomePageState extends State<HomePage> {
           ..latestPhoto = latestPhoto
           ..recent = recent
           ..onThisDay = onThisDay
+          ..today = todayMoments
           ..latestGrowth = latestGrowth
-          ..totalMoments = total;
+          ..latestMilestone = latestMilestone
+          ..totalMoments = total
+          ..monthRecordedDays = monthDays.length;
         _loading = false;
       });
     } catch (_) {
@@ -140,7 +164,6 @@ class _HomePageState extends State<HomePage> {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(child: _buildHeader(baby, p)),
-            SliverToBoxAdapter(child: _buildFeatureRow(p)),
             if (_loading)
               const SliverToBoxAdapter(
                 child: Padding(
@@ -150,8 +173,11 @@ class _HomePageState extends State<HomePage> {
                 ),
               )
             else ...[
+              SliverToBoxAdapter(child: _buildTodaySection(p, baby)),
               if (_data.onThisDay.isNotEmpty)
                 SliverToBoxAdapter(child: _fadeIn(_buildOnThisDayCard(p))),
+              SliverToBoxAdapter(child: _buildMonthStrip(p)),
+              SliverToBoxAdapter(child: _buildFeatureRow(p)),
               if (_data.latestGrowth != null)
                 SliverToBoxAdapter(child: _fadeIn(_buildGrowthCard(p))),
               if (_data.recent.isNotEmpty)
@@ -351,6 +377,317 @@ class _HomePageState extends State<HomePage> {
         ),
         child: Icon(icon, color: Colors.white, size: 19),
       ),
+    );
+  }
+
+  // ---------------- "今天" 主区域 ----------------
+
+  String get _greeting {
+    final h = DateTime.now().hour;
+    if (h < 5) return '夜深了';
+    if (h < 12) return '早上好';
+    if (h < 18) return '下午好';
+    return '晚上好';
+  }
+
+  void _openEditor({
+    DateTime? presetDate,
+    List<XFile>? initialMedia,
+    bool autofocus = false,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditRecordPage(
+          presetDate: presetDate,
+          initialMedia: initialMedia,
+          autofocusContent: autofocus,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _quickCapture(ImageSource source) async {
+    try {
+      final x = await ImagePicker().pickImage(source: source, maxWidth: 3000);
+      if (x == null || !mounted) return;
+      _openEditor(initialMedia: [x], autofocus: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('无法打开相机：$e')));
+      }
+    }
+  }
+
+  Future<void> _quickPick() async {
+    try {
+      final files = await ImagePicker().pickMultipleMedia();
+      if (files.isEmpty || !mounted) return;
+      _openEditor(initialMedia: files);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('无法打开相册：$e')));
+      }
+    }
+  }
+
+  /// 问候语 + 当天大卡 + 三个快捷记录入口。
+  Widget _buildTodaySection(AppPalette p, Baby baby) {
+    final t = Theme.of(context).textTheme;
+    final today = _data.today;
+    final hasToday = today.isNotEmpty;
+    final photoCount =
+        today.fold<int>(0, (sum, m) => sum + m.media.length);
+    // 当天大卡用图：优先当天记录的封面，否则最近一张照片。
+    final cover = today
+        .map((m) => m.cover)
+        .whereType<MediaItem>()
+        .firstOrNull;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 4, 24, 10),
+          child: Text(
+            '$_greeting，${baby.displayName}',
+            style: t.headlineMedium?.copyWith(fontSize: 22),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Material(
+            color: p.card,
+            borderRadius: BorderRadius.circular(24),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: p.line),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (cover != null || _data.latestPhoto != null)
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(24)),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 10,
+                        child: ThumbImage(
+                          (cover ?? _data.latestPhoto!).thumbFile ??
+                              (cover ?? _data.latestPhoto!).file,
+                          cacheWidth: 1000,
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          hasToday ? '今天的回忆在生长' : '今天还没有记录',
+                          style: t.titleLarge,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          hasToday
+                              ? '已留下 ${today.length} 段记录、$photoCount 张照片/视频'
+                              : '一张照片或一句话，都是将来会感谢的此刻',
+                          style: t.bodySmall,
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: () => _openEditor(),
+                                icon: const Icon(
+                                    Icons.edit_note_rounded,
+                                    size: 20),
+                                label: Text(
+                                    hasToday ? '继续记录今天' : '记录今天'),
+                              ),
+                            ),
+                            if (!hasToday) ...[
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => _openEditor(
+                                    presetDate: AppDateUtils.day(
+                                        DateTime.now().subtract(
+                                            const Duration(days: 1))),
+                                  ),
+                                  child: const Text('补记昨天'),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // 一键快速记录：拍照 / 选照片 / 写一句话
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              _quickAction(
+                  p, Icons.photo_camera_outlined, '拍照',
+                  () => _quickCapture(ImageSource.camera)),
+              const SizedBox(width: 10),
+              _quickAction(
+                  p, Icons.photo_library_outlined, '选照片', _quickPick),
+              const SizedBox(width: 10),
+              _quickAction(p, Icons.notes_rounded, '写一句话',
+                  () => _openEditor(autofocus: true)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _quickAction(
+      AppPalette p, IconData icon, String label, VoidCallback onTap) {
+    final t = Theme.of(context).textTheme;
+    return Expanded(
+      child: Material(
+        color: p.card,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: p.line),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 18, color: p.accent),
+                const SizedBox(width: 6),
+                Text(label,
+                    style: t.labelLarge?.copyWith(fontSize: 12.5)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 本月概览：已记录天数 / 最近里程碑 / 备份提醒。
+  Widget _buildMonthStrip(AppPalette p) {
+    final t = Theme.of(context).textTheme;
+    final state = context.read<AppState>();
+    final now = DateTime.now();
+    final milestone = _data.latestMilestone;
+    final lastBackup = state.lastBackupAt;
+    final backupOverdue =
+        lastBackup == null || now.difference(lastBackup).inDays >= 30;
+
+    Widget chip(IconData icon, String title, String sub, Color color,
+        VoidCallback onTap) {
+      return Expanded(
+        child: Material(
+          color: p.card,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: p.line),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, size: 18, color: color),
+                  const SizedBox(height: 8),
+                  Text(title,
+                      style: t.titleMedium?.copyWith(fontSize: 13.5),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(sub,
+                      style: t.labelSmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader('本月'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              chip(
+                Icons.calendar_month_rounded,
+                '${_data.monthRecordedDays} 天有记录',
+                AppDateUtils.yearMonth(now),
+                const Color(0xFF5AA7E8),
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const CalendarPage())),
+              ),
+              const SizedBox(width: 10),
+              chip(
+                Icons.emoji_events_outlined,
+                milestone?.title ?? '还没有里程碑',
+                milestone == null
+                    ? '记下第一个"第一次"'
+                    : AppDateUtils.full(milestone.date),
+                const Color(0xFFF7BE4B),
+                milestone != null
+                    ? () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                MilestoneDetailPage(milestoneId: milestone.id)))
+                    : () => widget.onJumpToTab(2),
+              ),
+              const SizedBox(width: 10),
+              chip(
+                backupOverdue
+                    ? Icons.cloud_off_outlined
+                    : Icons.cloud_done_outlined,
+                backupOverdue ? '该备份了' : '备份正常',
+                lastBackup == null
+                    ? '还没有备份过'
+                    : backupOverdue
+                        ? '距上次 ${now.difference(lastBackup).inDays} 天'
+                        : '上次 ${AppDateUtils.monthDay(lastBackup)}',
+                backupOverdue
+                    ? const Color(0xFFF27478)
+                    : const Color(0xFF55C7AF),
+                () => widget.onJumpToTab(3),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

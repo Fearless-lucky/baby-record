@@ -49,7 +49,22 @@ class DailyAlbumBatch {
 
 /// 按拍摄日期读取相册，并在设备端做人脸检测与大致场景分类。
 class DailyAlbumService {
-  static const maxSuggestions = 60;
+  static const defaultLimit = 60;
+
+  /// 截图与聊天工具保存的图片/表情包不参与推荐（按相册目录名过滤）。
+  static const _blockedDirs = [
+    'screenshot',
+    '截图',
+    'screen_shot',
+    'weixin',
+    'wechat',
+    'tencent/micromsg',
+    'pictures/qq',
+    'qq_images',
+    'qq收藏',
+    'emoji',
+    '表情',
+  ];
 
   final FaceDetector _faceDetector = FaceDetector(
     options: FaceDetectorOptions(
@@ -61,7 +76,13 @@ class DailyAlbumService {
     options: ImageLabelerOptions(confidenceThreshold: 0.5),
   );
 
-  Future<DailyAlbumBatch> loadForDay(DateTime day) async {
+  static bool _isBlocked(AssetEntity asset) {
+    final dir = (asset.relativePath ?? '').toLowerCase();
+    if (dir.isEmpty) return false;
+    return _blockedDirs.any(dir.contains);
+  }
+
+  Future<DailyAlbumBatch> loadForDay(DateTime day, {int limit = defaultLimit}) async {
     final permission = await PhotoManager.requestPermissionExtend();
     if (!permission.hasAccess) throw const AlbumPermissionDenied();
 
@@ -78,12 +99,26 @@ class DailyAlbumService {
 
     final total = await albums.first.assetCountAsync;
     if (total == 0) return const DailyAlbumBatch([], 0);
-    final assets = await albums.first.getAssetListRange(
-      start: 0,
-      end: total > maxSuggestions ? maxSuggestions : total,
-      type: RequestType.image,
-    );
+    var assets =
+        (await albums.first.getAssetListRange(
+          start: 0,
+          end: total,
+          type: RequestType.image,
+        )).toList();
+
+    // 过滤截图/聊天图片，并按（尺寸+拍摄秒）去掉连拍重复项。
+    assets = assets.where((a) => !_isBlocked(a)).toList();
+    final seen = <String>{};
+    assets = assets.where((a) {
+      final key =
+          '${a.width}x${a.height}_${a.createDateTime.millisecondsSinceEpoch ~/ 1000}';
+      return seen.add(key);
+    }).toList();
     assets.sort((a, b) => a.createDateTime.compareTo(b.createDateTime));
+    final filteredTotal = assets.length;
+    if (limit > 0 && assets.length > limit) {
+      assets = assets.sublist(0, limit);
+    }
 
     final candidates = <DailyAlbumCandidate>[];
     for (final asset in assets) {
@@ -100,7 +135,8 @@ class DailyAlbumService {
         ),
       );
     }
-    return DailyAlbumBatch(candidates, total);
+    // totalCount 返回过滤后的数量，避免与展示数量对不上。
+    return DailyAlbumBatch(candidates, filteredTotal);
   }
 
   Future<DailyAlbumCandidate> analyze(DailyAlbumCandidate candidate) async {
